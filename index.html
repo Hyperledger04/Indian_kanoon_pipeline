@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal Data Pipeline Prototype</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for aesthetic appeal and responsiveness */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7fafc;
+            min-height: 100vh;
+        }
+        .card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+        .btn-primary {
+            background-color: #059669; /* Emerald 600 */
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        .btn-primary:hover {
+            background-color: #047857; /* Emerald 700 */
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #059669;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .result-sent {
+            color: #34d399; /* Green-300 */
+        }
+        .result-failed {
+            color: #f87171; /* Red-400 */
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex justify-center items-start">
+
+    <div class="w-full max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-emerald-700">Indian Kanoon Data Pipeline (Live Scraper)</h1>
+            <p class="text-gray-600 mt-2">Frontend to Python (Selenium) to n8n AI Workflow</p>
+        </header>
+
+        <!-- Input Card -->
+        <div id="input-card" class="bg-white card p-6 rounded-xl mb-8 border border-emerald-200">
+            <h2 class="text-2xl font-semibold mb-4 text-emerald-700">1. Pipeline Configuration</h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label for="kanoonUrl" class="block text-sm font-medium text-gray-700 mb-1">Indian Kanoon Search URL (e.g., Filtered by Judge/Keyword)</label>
+                    <input type="url" id="kanoonUrl" 
+                           value="https://indiankanoon.org/search/?formInput=quashing+of+FIR+judge%3Avibha+kankanwadi+fromdate%3A+1-1-2024"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                
+                <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                    <div class="flex-1">
+                        <label for="webhookUrl" class="block text-sm font-medium text-gray-700 mb-1">n8n Webhook URL (Required)</label>
+                        <input type="url" id="webhookUrl" placeholder="Paste your n8n Production Webhook URL here..."
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div class="w-full sm:w-1/4">
+                         <label for="maxDocuments" class="block text-sm font-medium text-gray-700 mb-1">Max Documents (5)</label>
+                        <input type="number" id="maxDocuments" value="5" min="1" max="50"
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                </div>
+
+                <p class="text-xs text-gray-500 mt-1">
+                    **IMPORTANT:** You must have the **Python backend running** on port 5000 and **ChromeDriver installed** for this to work.
+                </p>
+
+                <button id="scrapeButton" 
+                        class="btn-primary w-full text-white font-medium py-3 px-6 rounded-lg shadow-md flex items-center justify-center disabled:opacity-50">
+                    <span id="buttonText">Step 2: Start Scraper & Send Data to n8n</span>
+                    <div id="loader" class="loader ml-2 hidden"></div>
+                </button>
+            </div>
+            <div id="messageBox" class="mt-4 text-sm p-3 rounded hidden"></div>
+        </div>
+
+        <!-- Results Card -->
+        <div id="results-card" class="bg-gray-800 card p-6 rounded-xl border border-gray-600 hidden">
+            <h2 class="text-2xl font-semibold mb-4 text-green-400">3. Execution Summary</h2>
+            <div id="summary-metrics" class="text-gray-300 mb-4 text-sm"></div>
+            <h3 class="text-lg font-medium text-gray-200 mb-2">Detailed Results Sent to n8n:</h3>
+            <pre id="jsonOutput" class="text-green-300 p-4 rounded-lg text-sm overflow-auto max-h-96 bg-gray-900"></pre>
+        </div>
+    </div>
+
+    <script>
+        // NOTE: The Flask server MUST be running on this address.
+        const API_URL = 'http://127.0.0.1:5000/scrape'; 
+        const scrapeButton = document.getElementById('scrapeButton');
+        const kanoonUrl = document.getElementById('kanoonUrl');
+        const webhookUrl = document.getElementById('webhookUrl');
+        const maxDocuments = document.getElementById('maxDocuments');
+        const resultsCard = document.getElementById('results-card');
+        const jsonOutput = document.getElementById('jsonOutput');
+        const messageBox = document.getElementById('messageBox');
+        const buttonText = document.getElementById('buttonText');
+        const loader = document.getElementById('loader');
+        const summaryMetrics = document.getElementById('summary-metrics');
+
+        function showMessage(type, content) {
+            messageBox.textContent = content;
+            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700', 'bg-yellow-100', 'text-yellow-700');
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'warning') {
+                messageBox.classList.add('bg-yellow-100', 'text-yellow-700');
+            } else {
+                messageBox.classList.add('bg-green-100', 'text-green-700');
+            }
+        }
+
+        scrapeButton.addEventListener('click', async () => {
+            const url = kanoonUrl.value.trim();
+            const hook = webhookUrl.value.trim();
+            const maxDocs = parseInt(maxDocuments.value);
+            
+            if (!url || !hook || maxDocs < 1) {
+                showMessage('error', 'Please provide a valid Indian Kanoon URL, n8n Webhook URL, and document count.');
+                return;
+            }
+
+            // UI State: Loading
+            scrapeButton.disabled = true;
+            buttonText.textContent = `Processing ${maxDocs} documents... (This may take time)`;
+            loader.classList.remove('hidden');
+            resultsCard.classList.add('hidden');
+            messageBox.classList.add('hidden');
+
+            try {
+                // Fetch call with exponential backoff for robustness
+                const MAX_RETRIES = 3;
+                let response = null;
+
+                for (let i = 0; i < MAX_RETRIES; i++) {
+                    try {
+                        response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                url: url, 
+                                webhook_url: hook,
+                                max_documents: maxDocs
+                            })
+                        });
+                        if (response.ok) {
+                            break; 
+                        }
+                    } catch (error) {
+                        if (i === MAX_RETRIES - 1) throw error; 
+                        const delay = Math.pow(2, i) * 1000;
+                        // Do not log the retry attempt as an error in the console.
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+
+                if (!response || !response.ok) {
+                    throw new Error(`Server returned status: ${response ? response.status : 'Unknown Error'}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayResults(result);
+                    if (result.total_webhooks_sent > 0) {
+                        showMessage('success', result.message);
+                    } else if (result.total_urls_found > 0) {
+                        showMessage('warning', `Found ${result.total_urls_found} cases, but none were successfully sent. Check your n8n URL.`);
+                    } else {
+                         showMessage('warning', `No judgment links were found on the search page.`);
+                    }
+                } else {
+                    throw new Error(result.error || "Backend processing failed.");
+                }
+
+            } catch (error) {
+                console.error('Pipeline failed:', error);
+                showMessage('error', `Connection Error: Ensure the Python backend ('kanoon_scraper_backend.py') is running on http://127.0.0.1:5000 and ChromeDriver is properly configured.`);
+                resultsCard.classList.add('hidden');
+            } finally {
+                // UI State: Complete
+                scrapeButton.disabled = false;
+                buttonText.textContent = 'Step 2: Start Scraper & Send Data to n8n';
+                loader.classList.add('hidden');
+            }
+        });
+
+        function displayResults(data) {
+            // Update summary metrics
+            summaryMetrics.innerHTML = `
+                <p><strong>URLs Found:</strong> ${data.total_urls_found}</p>
+                <p><strong>Webhooks Sent:</strong> <span class="result-sent">${data.total_webhooks_sent}</span></p>
+                <p><strong>Failures:</strong> <span class="result-failed">${data.total_urls_found - data.total_webhooks_sent}</span></p>
+            `;
+
+            // Display raw JSON report
+            jsonOutput.textContent = JSON.stringify(data.n8n_results, null, 2);
+            resultsCard.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
+
