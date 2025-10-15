@@ -1,13 +1,18 @@
-# Use Python slim image with Chromium support
 FROM python:3.11-slim
 
-# Install system dependencies for Chrome/Chromium
+# Install Chrome and ChromeDriver
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
     wget \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
 
 # Set working directory
 WORKDIR /app
@@ -19,14 +24,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY backend.py .
+COPY . .
 
 # Expose port
 EXPOSE 5000
 
-# Environment variables for Chrome
-ENV CHROME_BIN=/usr/bin/chromium
-ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
-
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "120", "backend:app"]
+CMD gunicorn --bind 0.0.0.0:$PORT --timeout 120 --workers 2 backend:app
