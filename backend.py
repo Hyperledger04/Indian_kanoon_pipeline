@@ -301,10 +301,4 @@ def scrape_indian_kanoon_api():
         if scraper:
             scraper.close()
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    print("----------------------------------------------------------------------")
-    print(f"  FLASK SCRAPER API STARTING ON PORT {port}...")
-    print(f"  Environment: {'PRODUCTION' if os.environ.get('RAILWAY_ENVIRONMENT') else 'DEVELOPMENT'}")
-    print("----------------------------------------------------------------------")
-    app.run(host='0.0.0.0', debug=False, port=port)
+
